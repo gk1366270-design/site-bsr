@@ -11,6 +11,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import passport from 'passport';
 import { Strategy as SteamStrategy } from 'passport-steam';
+import { WebSocketServer } from 'ws';
 // Import Assetto Corsa UDP Service - handle both development and production
 let assettoCorsaUdpService;
 try {
@@ -854,10 +855,8 @@ assettoCorsaUdpService.startUdpListener(9600);
 // WEBSOCKET FOR LIVE TIMING
 // ============================================================================
 
-import WebSocket from 'ws';
-
 // Criar servidor WebSocket
-const wss = new WebSocket.Server({ 
+const wss = new WebSocketServer({ 
   server: server,
   path: '/live-timing-ws'
 });
