@@ -758,64 +758,6 @@ app.post('/api/test/configure-udp-for-race', (req, res) => {
   }
 });
 
-// ============================================================================
-// LIVE TIMING ENDPOINTS
-// ============================================================================
-
-// HTTP Endpoint for live timing data
-app.get('/live-timing', (req, res) => {
-  try {
-    const raceState = assettoCorsaUdpService.getCurrentRaceState();
-    
-    const response = {
-      drivers: (raceState.drivers || []).map(driver => ({
-        position: driver.position,
-        number: driver.number,
-        name: driver.name,
-        team: driver.team,
-        car: driver.car,
-        lap: driver.lap,
-        time: driver.time,
-        gap: driver.gap,
-        bestLap: driver.bestLap,
-        lastLap: driver.lastLap,
-        status: driver.status,
-        fuelLevel: driver.fuelLevel || 0,
-        pitStops: driver.pitStops || 0,
-        tireCompound: driver.tireCompound || 'N/A',
-        carId: driver.carId || driver.position,
-        speed: driver.speed || 0,
-        rpm: driver.rpm || 0,
-        steeringAngle: driver.steeringAngle || 0,
-        positionX: driver.positionX || (driver.position / 20),
-        positionY: driver.positionY || (Math.sin(driver.position) * 0.5),
-      })),
-      trackConditions: {
-        temperature: raceState.trackConditions?.temperature || 25,
-        weatherType: raceState.trackConditions?.weatherType || 'Clear',
-        windSpeed: raceState.trackConditions?.windSpeed || 0,
-      },
-      sessionInfo: {
-        sessionTime: raceState.sessionInfo?.sessionTime || '0:00',
-        sessionStatus: raceState.sessionInfo?.sessionStatus || 'Waiting',
-        timeRemaining: raceState.sessionInfo?.timeRemaining || 'N/A',
-      },
-      lastUpdated: new Date().toISOString(),
-    };
-    
-    res.json(response);
-  } catch (error) {
-    console.error('Erro ao obter live timing:', error);
-    res.status(500).json({ 
-      error: 'Erro ao obter dados de live timing',
-      drivers: [],
-      trackConditions: {},
-      sessionInfo: {},
-      lastUpdated: new Date().toISOString(),
-    });
-  }
-});
-
 // 404 handler - catches all routes not matched above
 app.use((req, res) => {
   if (req.accepts('html')) {
