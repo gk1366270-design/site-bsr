@@ -11,7 +11,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import passport from 'passport';
 import { Strategy as SteamStrategy } from 'passport-steam';
-import { WebSocketServer } from 'ws';
 // Import Assetto Corsa UDP Service - handle both development and production
 let assettoCorsaUdpService;
 try {
@@ -79,105 +78,30 @@ console.log(`🎮 Steam API Key: ${process.env.STEAM_API_KEY ? '(set)' : '(NOT S
 
 
 const app = express();
-const PORT = process.env.PORT || 8080;
-
-// Start Vite dev server in development mode
-if (process.env.NODE_ENV === 'development') {
-  const { createServer } = await import('vite');
-  const vite = await createServer({
-    server: { middlewareMode: true },
-  });
-  app.use(vite.middlewares);
-}
-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Directories
 const DIST_DIR = path.join(__dirname, 'dist');
-
-// Basic middleware
-app.use(helmet());
-app.use(compression());
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Log request for debugging
-app.use((req, res, next) => {
-  if (process.env.NODE_ENV === 'development' || process.env.DEBUG_ROUTES) {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  }
-  next();
-});
-
-// Serve static build if exists
-app.use(express.static(DIST_DIR));
-
-// Rate limiter
-// If running behind a proxy (dev containers / hosting), trust proxy for correct client IP
-// Set to 1 for single proxy, or false for no proxy (local development)
-app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
-app.use(limiter);
-
-// Sessions
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
-
-// initialize passport for Steam OpenID
-app.use(passport.initialize());
-
-const STEAM_API_KEY = process.env.STEAM_API_KEY || '';
-
-passport.serializeUser(function(user, done) {
-  done(null, user);
-});
-passport.deserializeUser(function(obj, done) {
-  done(null, obj);
-});
-
-passport.use(new SteamStrategy({
-  returnURL: process.env.STEAM_RETURN_URL || `${process.env.FRONTEND_URL}/auth/steam/return`,
-  realm: process.env.STEAM_REALM || `${process.env.FRONTEND_URL}`,
-  apiKey: STEAM_API_KEY
-}, function(identifier, profile, done) {
-  process.nextTick(function () {
-    return done(null, { identifier: identifier, profile: profile });
-  });
-}));
-
-// Directories
 const IMAGES_DIR = path.join(__dirname, 'public', 'assets', 'images');
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
-if (!fs.existsSync(ACCOUNTS_FILE)) fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify([], null, 2), 'utf8');
+// Note: WebSocket upgrades for /live-timing-ws are handled by the
+// `assettoCorsaUdpService` (it uses a noServer WebSocketServer internally
+// and handles `upgrade` events via `setupWithHttpServer`). To avoid
+// duplicate WebSocket servers listening on the same path (which caused
+// intermittent crashes on Discloud), we do not create an additional
+// WebSocketServer here. The assetto service will broadcast updates to
+// connected clients.
 
-function readAccounts(){
-  try{
-    const raw = fs.readFileSync(ACCOUNTS_FILE, 'utf8');
-    return JSON.parse(raw || '[]');
-  }catch(e){
-    return [];
-  }
-}
-function writeAccounts(arr){
-  try{ fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(arr, null, 2), 'utf8'); }catch(e){ console.error('Failed to write accounts.json', e); }
-}
+const PORT = process.env.PORT || 8080;
 
+console.log('Assetto Corsa UDP service started on port 9600');
+console.log('WebSocket upgrades handled at /live-timing-ws by assettoCorsaUdpService');
+console.log('Live timing HTTP endpoint available at /live-timing');
 // News / Races / Standings files
 const NEWS_FILE = path.join(DATA_DIR, 'news.json');
 const RACES_FILE = path.join(DATA_DIR, 'races.json');
@@ -793,95 +717,16 @@ assettoCorsaUdpService.setupWithHttpServer(server);
 // Note: This will be reconfigured when race data is loaded
 assettoCorsaUdpService.startUdpListener(9600);
 
-// ============================================================================
-// WEBSOCKET FOR LIVE TIMING
-// ============================================================================
-
-// Criar servidor WebSocket
-const wss = new WebSocketServer({ 
-  server: server,
-  path: '/live-timing-ws'
-});
-
-const connectedClients = new Set();
-
-wss.on('connection', (ws) => {
-  console.log('🟢 Cliente conectado ao WebSocket');
-  connectedClients.add(ws);
-  
-  const sendInterval = setInterval(() => {
-    try {
-      if (ws.readyState === WebSocket.OPEN) {
-        const raceState = assettoCorsaUdpService.getCurrentRaceState();
-        
-        ws.send(JSON.stringify({
-          type: 'LIVE_UPDATE',
-          data: {
-            drivers: (raceState.drivers || []).map(driver => ({
-              position: driver.position,
-              number: driver.number,
-              name: driver.name,
-              team: driver.team,
-              car: driver.car,
-              lap: driver.lap,
-              time: driver.time,
-              gap: driver.gap,
-              bestLap: driver.bestLap,
-              lastLap: driver.lastLap,
-              status: driver.status,
-              fuelLevel: driver.fuelLevel || 0,
-              pitStops: driver.pitStops || 0,
-              tireCompound: driver.tireCompound || 'N/A',
-              carId: driver.carId || driver.position,
-              speed: driver.speed || 0,
-              rpm: driver.rpm || 0,
-              steeringAngle: driver.steeringAngle || 0,
-              positionX: driver.positionX || (driver.position / 20),
-              positionY: driver.positionY || (Math.sin(driver.position) * 0.5),
-            })),
-            trackConditions: {
-              temperature: raceState.trackConditions?.temperature || 25,
-              weatherType: raceState.trackConditions?.weatherType || 'Clear',
-              windSpeed: raceState.trackConditions?.windSpeed || 0,
-            },
-            sessionInfo: {
-              sessionTime: raceState.sessionInfo?.sessionTime || '0:00',
-              sessionStatus: raceState.sessionInfo?.sessionStatus || 'Waiting',
-              timeRemaining: raceState.sessionInfo?.timeRemaining || 'N/A',
-            },
-            lastUpdated: new Date().toISOString(),
-          }
-        }));
-      }
-    } catch (error) {
-      console.error('Erro ao enviar WebSocket:', error);
-    }
-  }, 1000);
-  
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      if (data.type === 'SUBSCRIBE') {
-        console.log(`✅ Cliente subscrito à corrida ${data.raceId}`);
-      }
-    } catch (error) {
-      console.error('Erro ao parsear mensagem:', error);
-    }
-  });
-  
-  ws.on('close', () => {
-    console.log('🔴 Cliente desconectado do WebSocket');
-    connectedClients.delete(ws);
-    clearInterval(sendInterval);
-  });
-  
-  ws.on('error', (error) => {
-    console.error('❌ Erro WebSocket:', error);
-  });
-});
+// Note: WebSocket upgrades for /live-timing-ws are handled by the
+// `assettoCorsaUdpService` (it uses a noServer WebSocketServer internally
+// and handles `upgrade` events via `setupWithHttpServer`). To avoid
+// duplicate WebSocket servers listening on the same path (which caused
+// intermittent crashes on Discloud), we do not create an additional
+// WebSocketServer here. The assetto service will broadcast updates to
+// connected clients.
 
 console.log('Assetto Corsa UDP service started on port 9600');
-console.log('WebSocket server available at /live-timing-ws');
+console.log('WebSocket upgrades handled at /live-timing-ws by assettoCorsaUdpService');
 console.log('Live timing HTTP endpoint available at /live-timing');
 
 server.on('error', (err) => {

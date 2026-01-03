@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "postinstall": "npm run build",
     "build": "vite build",
     "dev": "vite",
     "build:dev": "vite build --mode development",
