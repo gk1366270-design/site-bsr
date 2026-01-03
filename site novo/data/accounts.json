@@ -1,0 +1,17 @@
+[
+  {
+    "username": "steam_76561198419559590",
+    "displayName": "GoldZera",
+    "createdAt": "2026-01-02T13:55:20.315Z",
+    "steam": {
+      "id": "76561198419559590",
+      "displayName": "GoldZera",
+      "avatar": "https://avatars.steamstatic.com/4ab3db0761bdfb0b02c32de00e0924e1270cf81a_full.jpg"
+    },
+    "stats": {
+      "wins": 2,
+      "podiums": 2,
+      "points": 10
+    }
+  }
+]

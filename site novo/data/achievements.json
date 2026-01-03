@@ -1,0 +1,92 @@
+[
+  {
+    "id": "first_win",
+    "title": "Primeira Vitória",
+    "description": "Conquiste sua primeira vitória em uma corrida",
+    "icon": "trophy",
+    "category": "racing",
+    "requirement": "wins >= 1",
+    "rarity": "common"
+  },
+  {
+    "id": "podium_master",
+    "title": "Mestre do Pódio",
+    "description": "Alcance 10 pódios na temporada",
+    "icon": "medal",
+    "category": "racing",
+    "requirement": "podiums >= 10",
+    "rarity": "epic"
+  },
+  {
+    "id": "champion",
+    "title": "Campeão",
+    "description": "Vença o campeonato da temporada",
+    "icon": "crown",
+    "category": "championship",
+    "requirement": "championship_win == true",
+    "rarity": "legendary"
+  },
+  {
+    "id": "dedicated_racer",
+    "title": "Piloto Dedicado",
+    "description": "Participe de 20 corridas",
+    "icon": "flag",
+    "category": "participation",
+    "requirement": "races_participated >= 20",
+    "rarity": "rare"
+  },
+  {
+    "id": "speed_demon",
+    "title": "Demônio da Velocidade",
+    "description": "Alcance uma velocidade média acima de 200 km/h",
+    "icon": "zap",
+    "category": "performance",
+    "requirement": "avg_speed >= 200",
+    "rarity": "rare"
+  },
+  {
+    "id": "consistent_driver",
+    "title": "Piloto Consistente",
+    "description": "Termine todas as corridas da temporada no top 10",
+    "icon": "target",
+    "category": "consistency",
+    "requirement": "all_top_10 == true",
+    "rarity": "epic"
+  },
+  {
+    "id": "first_podium",
+    "title": "Primeiro Pódio",
+    "description": "Alcance seu primeiro pódio em uma corrida",
+    "icon": "medal",
+    "category": "racing",
+    "requirement": "podiums >= 1",
+    "rarity": "common"
+  },
+  {
+    "id": "veteran_racer",
+    "title": "Piloto Veterano",
+    "description": "Alcance 50 pontos totais",
+    "icon": "trophy",
+    "category": "progression",
+    "requirement": "points >= 50",
+    "rarity": "rare"
+  },
+  {
+    "id": "elite_racer",
+    "title": "Piloto de Elite",
+    "description": "Alcance 100 pontos totais",
+    "icon": "crown",
+    "category": "progression",
+    "requirement": "points >= 100",
+    "rarity": "epic"
+  },
+  {
+    "id": "winning_streak",
+    "title": "Sequência Vencedora",
+    "description": "Ganhe 5 corridas",
+    "icon": "zap",
+    "category": "racing",
+    "requirement": "wins >= 5",
+    "rarity": "rare"
+  }
+]
