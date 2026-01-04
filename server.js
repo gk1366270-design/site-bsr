@@ -39,18 +39,35 @@ try {
   }
 }
 
-// Load .env file only in development
-// In production (Discloud), use environment variables from the system
-if (process.env.NODE_ENV !== 'production') {
+// Load .env when NODE_ENV is not explicitly set (local development)
+if (!process.env.NODE_ENV) {
   dotenv.config();
 }
 
-// Detect environment
-const isProduction = process.env.NODE_ENV === 'production';
-const isDevelopment = process.env.NODE_ENV === 'development' || !isProduction;
+// If Discloud-specific environment variables are present, force production mode
+if (process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_APP_ID || process.env.DISCORD_PUBLIC_KEY || process.env.DISCORD_CLIENT_SECRET || process.env.DISCORD_CLIENT_ID || process.env.DISCORD_TOKEN) {
+  process.env.NODE_ENV = 'production';
+  console.log('🔧 Forced production mode for Discloud deployment');
+}
 
-if (isDevelopment && !process.env.NODE_ENV) {
-  process.env.NODE_ENV = 'development';
+// Detect environment - use process.env which has priority
+const isProduction = process.env.NODE_ENV === 'production';
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+// Log environment detection for debugging
+console.log('🔍 Environment Detection:');
+console.log('   NODE_ENV:', process.env.NODE_ENV);
+console.log('   Is Production:', isProduction);
+console.log('   Is Development:', isDevelopment);
+
+// If we're not in production but Discloud-specific variables are present,
+// force production mode (Discloud sets these but might not set NODE_ENV)
+if (!isProduction && !isDevelopment &&
+    (process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_APP_ID ||
+     process.env.DISCORD_PUBLIC_KEY || process.env.DISCORD_CLIENT_SECRET ||
+     process.env.DISCORD_CLIENT_ID || process.env.DISCORD_TOKEN)) {
+  console.log('🔧 Forcing production mode (Discloud environment detected)');
+  process.env.NODE_ENV = 'production';
 }
 
 // Validate critical environment variables in production
@@ -67,12 +84,34 @@ if (isProduction) {
 
 // Set default values with preference for environment variables
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
-process.env.FRONTEND_URL = process.env.FRONTEND_URL || 'https://brasilsimracing.discloud.app';
+
+// Dynamic URL configuration based on environment
+// For development: use your local IP 192.168.1.66
+// For production (Discloud): use https://brasilsimracing.discloud.app
+const LOCAL_IP = '192.168.1.66';
+const LOCAL_FRONTEND_PORT = 3000;
+const DISCLOUD_URL = 'https://brasilsimracing.discloud.app';
+
+// Set URLs based on environment
+if (isDevelopment) {
+  // In development, use your local IP
+  process.env.FRONTEND_URL = process.env.FRONTEND_URL || `http://${LOCAL_IP}:${LOCAL_FRONTEND_PORT}`;
+  process.env.STEAM_RETURN_URL = process.env.STEAM_RETURN_URL || `http://${LOCAL_IP}:${LOCAL_FRONTEND_PORT}/auth/steam/return`;
+  process.env.STEAM_REALM = process.env.STEAM_REALM || `http://${LOCAL_IP}:${LOCAL_FRONTEND_PORT}`;
+} else {
+  // In production (Discloud), use the domain
+  process.env.FRONTEND_URL = process.env.FRONTEND_URL || DISCLOUD_URL;
+  process.env.STEAM_RETURN_URL = process.env.STEAM_RETURN_URL || `${DISCLOUD_URL}/auth/steam/return`;
+  process.env.STEAM_REALM = process.env.STEAM_REALM || DISCLOUD_URL;
+}
+
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
 process.env.STEAM_API_KEY = process.env.STEAM_API_KEY || '';
 
 console.log(`📦 Environment: ${process.env.NODE_ENV}`);
 console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL}`);
+console.log(`🔐 Steam Return URL: ${process.env.STEAM_RETURN_URL}`);
+console.log(`🔐 Steam Realm: ${process.env.STEAM_REALM}`);
 console.log(`🔐 Session Secret: ${process.env.SESSION_SECRET ? '(set)' : '(NOT SET - WARNING!)'}`);
 console.log(`🎮 Steam API Key: ${process.env.STEAM_API_KEY ? '(set)' : '(NOT SET - Steam auth will fail!)'}`);
 
@@ -88,6 +127,20 @@ const IMAGES_DIR = path.join(__dirname, 'public', 'assets', 'images');
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// Auto-build frontend if dist directory doesn't exist (for Discloud deployment)
+if (!fs.existsSync(DIST_DIR) || !fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
+  console.log('🔧 Dist directory not found. Attempting to build frontend...');
+  try {
+    const { execSync } = await import('child_process');
+    console.log('📦 Running: npm run build');
+    execSync('npm run build', { stdio: 'inherit', cwd: __dirname });
+    console.log('✅ Frontend build completed successfully');
+  } catch (error) {
+    console.error('❌ Failed to build frontend:', error);
+    console.warn('⚠️  Server will start but frontend may not work without built files');
+  }
+}
 
 // Accounts file (ensure exists)
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
@@ -257,6 +310,36 @@ app.get('/api/admin/check', (req,res)=>{
   console.log('Username:', req.session.user.username);
   console.log('isAdmin:', !!admins[req.session.user.username]);
   res.json({ isAdmin: !!admins[req.session.user.username] });
+});
+
+// Get full user data from database
+app.get('/api/user/full', (req,res)=>{
+  if(!req.session || !req.session.user) {
+    return res.json({ user: null });
+  }
+  
+  try {
+    const accounts = readAccounts();
+    const account = accounts.find(a => a.username === req.session.user.username);
+    
+    if(account) {
+      // Return session user with avatar from account if available
+      const fullUser = {
+        ...req.session.user,
+        displayName: account.displayName || req.session.user.displayName,
+        avatar: account.steam?.avatar || req.session.user.avatar,
+        email: account.email,
+        stats: account.stats
+      };
+      return res.json({ user: fullUser });
+    } else {
+      // Return session user as-is if account not found
+      return res.json({ user: req.session.user });
+    }
+  } catch(e) {
+    console.error('Error getting full user data:', e);
+    return res.json({ user: req.session.user });
+  }
 });
 
 // Logout
@@ -550,12 +633,26 @@ app.get('/auth/steam/return', (req, res, next) => {
       if (!acc.stats) acc.stats = { wins: 0, podiums: 0, points: 0 };
     }
     writeAccounts(accounts);
-    req.session.user = { username: acc.username };
-    console.log('Steam user saved, username:', acc.username);
+    // Save complete user info to session (including avatar for Header display)
+    req.session.user = {
+      username: acc.username,
+      displayName: acc.displayName,
+      avatar: acc.steam?.avatar || avatar,
+      id: acc.username,
+      role: 'user'
+    };
+    console.log('Steam user saved, username:', acc.username, 'displayName:', acc.displayName, 'avatar:', !!acc.steam?.avatar);
     res.redirect(process.env.FRONTEND_URL);
   } catch (e) {
     console.error('Error saving account:', e);
-    req.session.user = { username: 'steam_' + steamid, displayName, avatar };
+    // Save fallback user info to session
+    req.session.user = {
+      username: 'steam_' + steamid,
+      displayName: displayName,
+      avatar: avatar,
+      id: 'steam_' + steamid,
+      role: 'user'
+    };
     res.redirect(process.env.FRONTEND_URL);
   }
 });
@@ -758,6 +855,12 @@ app.use((req, res, next) => {
 
 // 404 handler - catches all routes not matched above
 app.use((req, res) => {
+  // Never serve HTML for API routes - always return JSON
+  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  // For non-API routes, serve HTML if available
   if (req.accepts('html')) {
     const indexPath = path.join(DIST_DIR, 'index.html');
     if (fs.existsSync(indexPath)) {
@@ -765,6 +868,7 @@ app.use((req, res) => {
     }
   }
 
+  // Fallback for other content types
   if (req.accepts('json')) {
     return res.status(404).json({ error: 'Not found' });
   }
@@ -779,9 +883,35 @@ app.use((err, req, res, next) => {
 });
 
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log('BSR server running on port', PORT);
-});
+let server;
+let retries = 5;
+let currentRetry = 0;
+
+function startServer() {
+  server = app.listen(PORT, '0.0.0.0', () => {
+    console.log('BSR server running on port', PORT);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Port ${PORT} is already in use. Retrying... (${currentRetry + 1}/${retries})`);
+      if (currentRetry < retries) {
+        currentRetry++;
+        setTimeout(startServer, 5000); // Retry after 5 seconds
+      } else {
+        console.error('Failed to start server after multiple retries. Using fallback port...');
+        const fallbackPort = PORT + 1;
+        server = app.listen(fallbackPort, '0.0.0.0', () => {
+          console.log(`BSR server running on fallback port ${fallbackPort}`);
+        });
+      }
+    } else {
+      console.error('Server error:', err);
+    }
+  });
+}
+
+startServer();
 
 // Setup Assetto Corsa UDP service with WebSocket integration
 assettoCorsaUdpService.setupWithHttpServer(server);

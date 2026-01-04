@@ -5,14 +5,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { User, Trophy, Users, Calendar, Zap, Shield, Star, ChevronRight } from "lucide-react";
 import heroImage from "@/assets/hero-racing.jpg";
+import { apiGet } from '@/lib/api';
+
+interface SessionResponse {
+  user: {
+    id: string;
+    username: string;
+    displayName?: string;
+    email?: string;
+    role: 'admin' | 'user' | 'premium';
+    avatar?: string;
+  } | null;
+}
 
 const Login = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
     // Check if user is already logged in
-    fetch('/api/session')
-      .then(res => res.json())
+    apiGet<SessionResponse>('/api/session')
       .then(data => {
         if (data.user) {
           navigate('/');
@@ -22,7 +33,11 @@ const Login = () => {
   }, [navigate]);
 
   const handleSteamLogin = () => {
-    window.location.href = '/auth/steam';
+    // Use the full backend URL for Steam authentication
+    const backendUrl = import.meta.env.DEV
+      ? 'http://192.168.1.66:8080/auth/steam'
+      : 'https://brasilsimracing.discloud.app/auth/steam';
+    window.location.href = backendUrl;
   };
 
   const benefits = [

@@ -2,16 +2,47 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Flag, Menu, X, User } from "lucide-react";
 import { Link } from "react-router-dom";
+import { apiGet } from '@/lib/api';
+
+interface User {
+  id: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  role: 'admin' | 'user' | 'premium';
+  avatar?: string;
+}
+
+interface SessionResponse {
+  user: User | null;
+}
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    fetch('/api/session')
-      .then(res => res.json())
-      .then(data => setUser(data.user))
-      .catch(err => console.error('Failed to fetch session:', err));
+    const loadUser = async () => {
+      try {
+        const data = await apiGet<SessionResponse>('/api/session');
+        if(data.user) {
+          // Load full user data with avatar and details
+          const fullData = await apiGet<SessionResponse>('/api/user/full');
+          setUser(fullData.user);
+        } else {
+          setUser(null);
+        }
+      } catch (err) {
+        console.error('Failed to fetch user data:', err);
+      }
+    };
+    
+    loadUser();
+    
+    // Also check for updates when page gains focus (user comes back from login)
+    const handleFocus = () => loadUser();
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const navLinks = [
@@ -81,10 +112,10 @@ const Header = () => {
             </div>
           ) : (
             <Button variant="hero" size="default" asChild>
-              <a href="/login">
+              <Link to="/login">
                 <User className="h-4 w-4" />
                 ENTRAR
-              </a>
+              </Link>
             </Button>
           )}
         </div>
@@ -145,10 +176,10 @@ const Header = () => {
               </div>
             ) : (
               <Button variant="hero" size="lg" className="mt-4" asChild>
-                <a href="/auth/steam">
+                <Link to="/login" onClick={() => setIsMenuOpen(false)}>
                   <User className="h-4 w-4" />
                   ENTRAR
-                </a>
+                </Link>
               </Button>
             )}
           </nav>

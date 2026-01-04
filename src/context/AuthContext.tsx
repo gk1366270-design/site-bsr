@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
+import { apiGet, apiPost } from '@/lib/api';
 
 interface User {
   id: string;
@@ -14,6 +15,10 @@ interface User {
     podiums: number;
     points: number;
   };
+}
+
+interface SessionResponse {
+  user: User | null;
 }
 
 interface AuthContextType {
@@ -37,18 +42,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const checkAuth = async (): Promise<boolean> => {
     try {
       setIsLoading(true);
-      const response = await fetch('/api/session');
+      const sessionData = await apiGet<SessionResponse>('/api/session');
       
-      if (!response.ok) {
-        setUser(null);
-        setIsLoading(false);
-        return false;
-      }
-
-      const data = await response.json();
-      
-      if (data.user) {
-        setUser(data.user);
+      if (sessionData.user) {
+        // Load full user data with avatar and details
+        try {
+          const fullData = await apiGet<SessionResponse>('/api/user/full');
+          if(fullData.user) {
+            setUser(fullData.user);
+          } else {
+            setUser(sessionData.user);
+          }
+        } catch(e) {
+          console.warn('Failed to get full user data, using session data:', e);
+          setUser(sessionData.user);
+        }
         setIsLoading(false);
         return true;
       } else {
@@ -73,25 +81,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const logout = () => {
+  const logout = async () => {
     setUser(null);
     localStorage.removeItem('user');
-    fetch('/api/logout', { method: 'POST' })
-      .then(() => {
-        toast({
-          title: 'Até logo!',
-          description: 'Você foi desconectado com sucesso.',
-        });
-        navigate('/login');
-      })
-      .catch(error => {
-        console.error('Logout failed:', error);
-        toast({
-          title: 'Erro',
-          description: 'Falha ao fazer logout. Por favor, tente novamente.',
-          variant: 'destructive',
-        });
+    try {
+      await apiPost('/api/logout', {});
+      toast({
+        title: 'Até logo!',
+        description: 'Você foi desconectado com sucesso.',
       });
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+      toast({
+        title: 'Erro',
+        description: 'Falha ao fazer logout. Por favor, tente novamente.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const updateUser = (userData: Partial<User>) => {

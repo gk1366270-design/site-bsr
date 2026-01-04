@@ -9,7 +9,8 @@
     "dev": "vite",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:full": "concurrently \"npm run start\" \"npm run dev\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

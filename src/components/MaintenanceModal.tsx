@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle } from 'lucide-react';
+import { apiGet } from '@/lib/api';
+
+interface Settings {
+  maintenanceMode: boolean;
+  maintenanceMessage: string;
+}
 
 const MaintenanceModal = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -9,8 +15,7 @@ const MaintenanceModal = () => {
 
   useEffect(() => {
     // Fetch settings to check maintenance mode
-    fetch('/api/settings')
-      .then(res => res.json())
+    apiGet<Settings>('/api/settings')
       .then(data => {
         if (data.maintenanceMode && data.maintenanceMessage) {
           setMaintenanceMessage(data.maintenanceMessage);
