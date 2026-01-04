@@ -88,11 +88,13 @@ class AssettoCorsaUdpService extends EventEmitter {
   startUdpListener(port) {
     try {
       // Check if socket is already bound
-      if (this.udpSocket.address()) {
-        console.log(`UDP socket already bound to port ${this.udpSocket.address().port}, closing first`);
+      if (this.udpSocket) {
+        console.log(`UDP socket already exists, closing first`);
         this.udpSocket.close();
       }
       
+      this.udpSocket = dgram.createSocket('udp4');
+      this.setupUdpSocket();
       this.udpSocket.bind(port);
       console.log(`Starting UDP listener on port ${port}`);
     } catch (error) {

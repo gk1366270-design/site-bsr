@@ -89,6 +89,17 @@ const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// Accounts file (ensure exists)
+const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
+if (!fs.existsSync(ACCOUNTS_FILE)) fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify([], null, 2), 'utf8');
+
+function readAccounts(){
+  try{ return JSON.parse(fs.readFileSync(ACCOUNTS_FILE,'utf8') || '[]'); }catch(e){ return []; }
+}
+function writeAccounts(arr){
+  try{ fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(arr, null, 2), 'utf8'); }catch(e){ console.error('Failed to write accounts.json', e); }
+}
+
 // Note: WebSocket upgrades for /live-timing-ws are handled by the
 // `assettoCorsaUdpService` (it uses a noServer WebSocketServer internally
 // and handles `upgrade` events via `setupWithHttpServer`). To avoid
@@ -102,6 +113,64 @@ const PORT = process.env.PORT || 8080;
 console.log('Assetto Corsa UDP service started on port 9600');
 console.log('WebSocket upgrades handled at /live-timing-ws by assettoCorsaUdpService');
 console.log('Live timing HTTP endpoint available at /live-timing');
+// Basic middleware
+app.use(helmet());
+app.use(compression());
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Rate limiter / trust proxy defaults (kept minimal)
+// Allow overriding via env var TRUST_PROXY=1. In production we enable trust proxy.
+const trustProxy = (process.env.TRUST_PROXY === '1') || (process.env.NODE_ENV === 'production');
+app.set('trust proxy', trustProxy ? 1 : false);
+if (trustProxy) console.log('Trust proxy is enabled');
+
+// Configure rate limiter. Use IP from request to avoid validation errors
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, keyGenerator: (req) => req.ip });
+app.use(limiter);
+
+// Sessions (required for passport-steam)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000
+  }
+}));
+
+// Initialize passport
+app.use(passport.initialize());
+app.use(passport.session());
+
+passport.serializeUser(function(user, done) { done(null, user); });
+passport.deserializeUser(function(obj, done) { done(null, obj); });
+
+const steamEnabled = !!process.env.STEAM_API_KEY;
+if (!steamEnabled) {
+  console.warn('Steam auth disabled: STEAM_API_KEY not set');
+}
+
+if (steamEnabled) {
+  try {
+    const returnURL = process.env.STEAM_RETURN_URL || `${process.env.FRONTEND_URL}/auth/steam/return`;
+    const realm = process.env.STEAM_REALM || `${process.env.FRONTEND_URL}`;
+    console.log('Configuring passport-steam with returnURL:', returnURL, 'realm:', realm);
+    passport.use(new SteamStrategy({
+      returnURL,
+      realm,
+      apiKey: process.env.STEAM_API_KEY
+    }, function(identifier, profile, done) {
+      process.nextTick(function () { return done(null, { identifier: identifier, profile: profile }); });
+    }));
+  } catch (err) {
+    console.error('Failed to configure passport-steam strategy:', err);
+  }
+}
 // News / Races / Standings files
 const NEWS_FILE = path.join(DATA_DIR, 'news.json');
 const RACES_FILE = path.join(DATA_DIR, 'races.json');
@@ -224,8 +293,6 @@ app.post('/api/races/:id/register', requireAuth, (req,res)=>{
             team: "Independent"
           });
         }
-        
-        writeStandings(standingsData);
       }
     }
   }
@@ -445,67 +512,58 @@ app.get('/api/csrf', (req, res) => {
   res.json({ csrf: req.session.csrfToken });
 });
 
-// Steam auth routes
-app.get('/auth/steam', passport.authenticate('steam', { failureRedirect: process.env.FRONTEND_URL }), (req, res) => {});
-app.get('/auth/steam/return', passport.authenticate('steam', { failureRedirect: process.env.FRONTEND_URL || '/' }), (req, res) => {
+// Add lightweight logging for /auth routes to help debug callback issues
+app.use('/auth', (req, res, next) => {
+  try {
+    console.log('Auth request:', req.method, req.originalUrl, 'query:', req.query, 'sessionID:', req.sessionID);
+  } catch (e) {
+    console.log('Auth logging error', e);
+  }
+  return next();
+});
+
+app.get('/auth/steam', (req, res, next) => {
+  console.log('Initiating Steam auth, sessionID:', req.sessionID);
+  next();
+}, passport.authenticate('steam', { failureRedirect: process.env.FRONTEND_URL }));
+
+app.get('/auth/steam/return', (req, res, next) => {
+  console.log('Steam callback received, query:', req.query, 'sessionID:', req.sessionID);
+  next();
+}, passport.authenticate('steam', { failureRedirect: process.env.FRONTEND_URL || '/' }), (req, res) => {
+  console.log('Steam authenticate middleware passed, user:', !!req.user);
   const info = req.user && req.user.profile ? req.user.profile : null;
-  if(!info){ return res.redirect(process.env.FRONTEND_URL); }
+  if (!info) { console.warn('Steam callback missing profile, redirecting to frontend'); return res.redirect(process.env.FRONTEND_URL); }
   const steamid = info.id || (info._json && info._json.steamid) || String(Date.now());
   const displayName = info.displayName || (info._json && info._json.personaname) || ('steam_' + steamid);
   const avatar = (info._json && (info._json.avatarfull || info._json.avatar)) || null;
-  // create or update account in data/accounts.json
-  try{
+  try {
     const accounts = readAccounts();
     let acc = accounts.find(a => a.steam && a.steam.id === steamid);
-    if(!acc){
+    if (!acc) {
       const username = 'steam_' + steamid;
       acc = { username, displayName, createdAt: new Date().toISOString(), steam: { id: steamid, displayName, avatar }, stats: { wins: 0, podiums: 0, points: 0 } };
       accounts.push(acc);
     } else {
       acc.displayName = displayName;
       acc.steam = Object.assign({}, acc.steam || {}, { id: steamid, displayName, avatar });
-      if(!acc.stats) acc.stats = { wins: 0, podiums: 0, points: 0 };
+      if (!acc.stats) acc.stats = { wins: 0, podiums: 0, points: 0 };
     }
     writeAccounts(accounts);
     req.session.user = { username: acc.username };
+    console.log('Steam user saved, username:', acc.username);
     res.redirect(process.env.FRONTEND_URL);
-  }catch(e){
+  } catch (e) {
     console.error('Error saving account:', e);
     req.session.user = { username: 'steam_' + steamid, displayName, avatar };
     res.redirect(process.env.FRONTEND_URL);
   }
 });
 
-// SPA fallback route - serve index.html for all unmatched routes
-app.use((req, res, next) => {
-  // Only apply SPA fallback to GET requests
-  if (req.method !== 'GET') {
-    return next();
-  }
-
-  // Check if the request is for an API route, auth route, or assets
-  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/') || req.path.startsWith('/assets/') || req.path.startsWith('/public/')) {
-    return next();
-  }
-
-  // Check if DIST_DIR exists and file exists
-  if (fs.existsSync(DIST_DIR)) {
-    const fullPath = path.join(DIST_DIR, req.path);
-    const indexPath = path.join(DIST_DIR, 'index.html');
-
-    // If the exact file exists, serve it (for static assets)
-    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-      return res.sendFile(fullPath);
-    }
-
-    // Otherwise, serve index.html for SPA routing
-    if (fs.existsSync(indexPath)) {
-      return res.sendFile(indexPath);
-    }
-  }
-
-  next();
-});
+// Serve static assets from the built `dist` directory
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR, { maxAge: '1d' }));
+}
 
 // Upload endpoint (example)
 app.post('/api/upload', upload.single('file'), (req, res) => {
@@ -683,19 +741,34 @@ app.post('/api/test/configure-udp-for-race', (req, res) => {
 });
 
 // 404 handler - catches all routes not matched above
+// SPA fallback route - serve index.html for all unmatched non-API GETs
+app.use((req, res, next) => {
+  // Only apply SPA fallback to GET requests
+  if (req.method !== 'GET') return next();
+
+  // Skip API/auth/assets/public routes
+  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/') || req.path.startsWith('/assets/') || req.path.startsWith('/public/')) {
+    return next();
+  }
+
+  const indexPath = path.join(DIST_DIR, 'index.html');
+  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+  return next();
+});
+
+// 404 handler - catches all routes not matched above
 app.use((req, res) => {
   if (req.accepts('html')) {
-    // For HTML requests, check if we can serve index.html
     const indexPath = path.join(DIST_DIR, 'index.html');
     if (fs.existsSync(indexPath)) {
       return res.sendFile(indexPath);
     }
   }
-  
+
   if (req.accepts('json')) {
     return res.status(404).json({ error: 'Not found' });
   }
-  
+
   res.status(404).send('Not found');
 });
 
@@ -739,3 +812,4 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception thrown:', err);
 });
+ 

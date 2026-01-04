@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => ({
     host: "0.0.0.0",
     port: mode === 'development' ? 8080 : Number(process.env.PORT || 8080),
     strictPort: false,
+    allowedHosts: ["brasilsimracing.discloud.app", "localhost", "127.0.0.1"],
   },
   build: {
     outDir: "dist",
